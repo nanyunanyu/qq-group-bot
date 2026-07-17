@@ -1,0 +1,23 @@
+{
+  "network": {
+    "httpServers": [],
+    "httpClients": [],
+    "websocketServers": [],
+    "websocketClients": [
+      {
+        "name": "qq-bot-reverse-ws",
+        "enable": true,
+        "url": "ws://qq-bot:8080/onebot/v11/ws",
+        "messagePostFormat": "array",
+        "reportSelfMessage": false,
+        "reconnectInterval": 5000,
+        "token": "__ONEBOT_ACCESS_TOKEN__",
+        "debug": false,
+        "heartInterval": 30000
+      }
+    ]
+  },
+  "musicSignUrl": "",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false
+}

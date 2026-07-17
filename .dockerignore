@@ -1,0 +1,6 @@
+**/.git
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/tests
+private_lobby/secrets
