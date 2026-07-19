@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
+from time import monotonic
+from zoneinfo import ZoneInfo
+
 from nonebot import logger, on_message
 from nonebot.adapters import Event
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageSegment
@@ -16,6 +20,10 @@ from qq_bot.security import (
     sanitize_model_output,
 )
 from qq_bot.services.ai_chat import AiServiceUnavailable, request_ai_response
+from qq_bot.services.conversation_memory import (
+    GroupConversationMemory,
+    render_conversation_context,
+)
 from qq_bot.services.room_status import (
     RoomReportUnavailable,
     load_ai_room_context,
@@ -28,6 +36,47 @@ rate_limiter = SlidingWindowRateLimiter(
     window_seconds=settings.ai_rate_limit_window_seconds,
 )
 concurrency_limiter = AiConcurrencyLimiter(settings.ai_max_concurrency)
+conversation_memory = GroupConversationMemory(
+    ttl_seconds=settings.ai_memory_ttl_seconds,
+    max_turns=settings.ai_memory_max_turns,
+    max_chars=settings.ai_memory_max_chars,
+    max_groups=settings.ai_memory_max_groups,
+)
+
+
+async def request_sanitized_answer(
+    question: str,
+    *,
+    conversation_context: str | None = None,
+) -> str:
+    async with concurrency_limiter.slot():
+        room_context = None
+        if needs_room_context(question):
+            room_context = await load_ai_room_context(settings)
+        raw_answer = await request_ai_response(
+            settings,
+            question,
+            room_context=room_context,
+            conversation_context=conversation_context,
+        )
+    return sanitize_model_output(
+        raw_answer,
+        max_chars=settings.ai_max_output_chars,
+        forbidden_values=(settings.ai_api_key,),
+    )
+
+
+async def request_group_answer(group_id: int, question: str) -> str:
+    if not settings.ai_memory_enabled:
+        return await request_sanitized_answer(question)
+
+    async with conversation_memory.session(group_id) as session:
+        answer = await request_sanitized_answer(
+            question,
+            conversation_context=render_conversation_context(session.history),
+        )
+        session.remember(question, answer)
+        return answer
 
 
 def allowed_group_mention(event: Event) -> bool:
@@ -36,6 +85,19 @@ def allowed_group_mention(event: Event) -> bool:
         and event.to_me
         and is_group_allowed(event.group_id, settings.allowed_group_ids)
     )
+
+
+def format_timed_answer(
+    answer: str,
+    *,
+    elapsed_seconds: float,
+    answered_at: datetime,
+) -> str:
+    timing = (
+        f"响应时间：{max(0.0, elapsed_seconds):.2f} 秒 | "
+        f"回答时间：{answered_at:%Y-%m-%d %H:%M:%S}"
+    )
+    return f"{answer}\n\n{timing}"
 
 
 if settings.ai_enabled:
@@ -69,21 +131,9 @@ if settings.ai_enabled:
         if not await rate_limiter.allow(rate_key):
             await ai_message.finish("请求过于频繁，请稍后再试。")
 
+        started_at = monotonic()
         try:
-            async with concurrency_limiter.slot():
-                room_context = None
-                if needs_room_context(question):
-                    room_context = await load_ai_room_context(settings)
-                raw_answer = await request_ai_response(
-                    settings,
-                    question,
-                    room_context=room_context,
-                )
-                answer = sanitize_model_output(
-                    raw_answer,
-                    max_chars=settings.ai_max_output_chars,
-                    forbidden_values=(settings.ai_api_key,),
-                )
+            answer = await request_group_answer(event.group_id, question)
         except AiBusy:
             await ai_message.finish("当前请求较多，请稍后再试。")
         except RoomReportUnavailable:
@@ -96,6 +146,11 @@ if settings.ai_enabled:
             logger.warning("AI request failed")
             await ai_message.finish("AI 服务暂时不可用，请稍后重试。")
 
+        answer = format_timed_answer(
+            answer,
+            elapsed_seconds=monotonic() - started_at,
+            answered_at=datetime.now(ZoneInfo(settings.report_timezone)),
+        )
         await ai_message.finish(MessageSegment.text(answer))
 else:
     logger.info("AI plugin is disabled because no model is configured")

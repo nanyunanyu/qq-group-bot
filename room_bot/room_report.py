@@ -98,25 +98,28 @@ def project_lobby(
 
 
 def render_room_report(snapshot: LobbySnapshot) -> str:
+    empty_room_labels = [
+        room.label for room in snapshot.rooms if room.player_count == 0
+    ]
     sections = ["联机房间状态"]
     for platform in ("Yuzu", "Citra"):
-        room_blocks = []
-        for room in snapshot.rooms:
-            if room.platform != platform:
-                continue
-            player_display = "、".join(room.player_names) or "Nobody Here"
-            room_blocks.append(
-                "\n".join(
-                    (
-                        room.label,
-                        f"端口：{room.port}",
-                        f"人数：{room.player_count}/{room.max_players}",
-                        f"玩家：{player_display}",
-                    )
+        room_blocks = [
+            "\n".join(
+                (
+                    room.label,
+                    f"端口：{room.port}",
+                    f"人数：{room.player_count}/{room.max_players}",
+                    f"玩家：{'、'.join(room.player_names) or 'Nobody Here'}",
                 )
             )
-        sections.append(f"【{platform}】\n" + "\n\n".join(room_blocks))
+            for room in snapshot.rooms
+            if room.platform == platform and room.player_count > 0
+        ]
+        if room_blocks:
+            sections.append(f"【{platform}】\n" + "\n\n".join(room_blocks))
 
+    if empty_room_labels:
+        sections.append(f"【{'、'.join(empty_room_labels)}均无人】")
     sections.append(f"更新时间：{snapshot.updated_at:%Y-%m-%d %H:%M:%S}")
     return "\n\n".join(sections)
 

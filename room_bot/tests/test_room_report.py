@@ -18,7 +18,7 @@ def room(name: str, port: int, maximum: int = 4, players: list | None = None) ->
     }
 
 
-def test_report_maps_managed_rooms_and_players():
+def test_report_only_expands_occupied_rooms_and_summarizes_empty_rooms():
     payload = {
         "rooms": [
             room(
@@ -32,10 +32,43 @@ def test_report_maps_managed_rooms_and_players():
 
     report = build_room_report(payload, updated_at=datetime(2026, 7, 16, 18, 0, 0))
 
-    assert "【Yuzu】\nGU房间1\n端口：9001\n人数：1/4\n玩家：Hunter" in report
-    assert "GU房间2\n端口：9002\n人数：0/4\n玩家：Nobody Here" in report
-    assert "【Citra】\nXX房间1\n端口：10001\n人数：0/4\n玩家：Nobody Here" in report
+    assert (
+        "【Yuzu】\nGU房间1\n端口：9001\n人数：1/4\n玩家：Hunter"
+        in report
+    )
+    assert "GU房间2\n端口：9002" not in report
+    assert "XX房间1\n端口：10001" not in report
+    assert "【Citra】" not in report
+    assert (
+        "【GU房间2、XX房间1、XX房间2、4G房间1、4G房间2、"
+        "3G房间、新手房间均无人】"
+    ) in report
     assert "更新时间：2026-07-16 18:00:00" in report
+
+
+def test_report_separates_occupied_rooms_by_platform():
+    payload = {
+        "rooms": [
+            room(
+                "怪物猎人GU房间1 | 联机请加群：1032631393",
+                9001,
+                players=[{"nickname": "Hunter"}],
+            ),
+            room(
+                "怪物猎人4G房间2 | 联机请加群：1032631393",
+                10004,
+                players=[{"nickname": "Terraria"}],
+            ),
+        ]
+    }
+
+    report = build_room_report(payload, updated_at=datetime(2026, 7, 16, 18, 0, 0))
+
+    yuzu_group = "【Yuzu】\nGU房间1\n端口：9001"
+    citra_group = "【Citra】\n4G房间2\n端口：10004"
+    assert yuzu_group in report
+    assert citra_group in report
+    assert report.index(yuzu_group) < report.index(citra_group)
 
 
 def test_report_counts_players_even_when_nickname_is_empty():
@@ -89,4 +122,9 @@ def test_exact_name_and_port_are_required():
         ]
     }
     report = build_room_report(payload, updated_at=datetime(2026, 7, 16, 18, 0, 0))
-    assert "GU房间1\n端口：9001\n人数：0/4\n玩家：Nobody Here" in report
+
+    assert "GU房间1\n端口：9001" not in report
+    assert (
+        "【GU房间1、GU房间2、XX房间1、XX房间2、4G房间1、"
+        "4G房间2、3G房间、新手房间均无人】"
+    ) in report

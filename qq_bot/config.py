@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import os
 from typing import Mapping
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,7 @@ class BotSettings:
     allowed_group_ids: frozenset[int]
     lobby_url: str
     report_timeout_seconds: float
+    report_timezone: str = "Asia/Shanghai"
     ai_base_url: str = ""
     ai_api_key: str = field(default="", repr=False)
     ai_model: str = ""
@@ -23,6 +25,11 @@ class BotSettings:
     ai_rate_limit_requests: int = 5
     ai_rate_limit_window_seconds: float = 60.0
     ai_max_concurrency: int = 2
+    ai_memory_enabled: bool = True
+    ai_memory_ttl_seconds: float = 900.0
+    ai_memory_max_turns: int = 6
+    ai_memory_max_chars: int = 8000
+    ai_memory_max_groups: int = 256
 
     @property
     def ai_enabled(self) -> bool:
@@ -55,6 +62,15 @@ def _boolean(source: Mapping[str, str], name: str, default: str) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be a boolean value")
+
+
+def _timezone(source: Mapping[str, str], name: str, default: str) -> str:
+    value = source.get(name, default).strip()
+    try:
+        ZoneInfo(value)
+    except (ValueError, ZoneInfoNotFoundError) as error:
+        raise ValueError(f"{name} must be a valid IANA timezone") from error
+    return value
 
 
 def _validate_ai_base_url(raw: str) -> str:
@@ -107,6 +123,9 @@ def load_settings(environ: Mapping[str, str] | None = None) -> BotSettings:
             "PRIVATE_LOBBY_URL", "http://private-lobby:8080/lobby"
         ),
         report_timeout_seconds=report_timeout,
+        report_timezone=_timezone(
+            source, "ROOM_REPORT_TIMEZONE", "Asia/Shanghai"
+        ),
         ai_base_url=ai_base_url,
         ai_api_key=ai_api_key,
         ai_model=ai_model,
@@ -125,6 +144,19 @@ def load_settings(environ: Mapping[str, str] | None = None) -> BotSettings:
             source, "AI_RATE_LIMIT_WINDOW_SECONDS", "60"
         ),
         ai_max_concurrency=_positive_int(source, "AI_MAX_CONCURRENCY", "2"),
+        ai_memory_enabled=_boolean(source, "AI_MEMORY_ENABLED", "true"),
+        ai_memory_ttl_seconds=_positive_float(
+            source, "AI_MEMORY_TTL_SECONDS", "900"
+        ),
+        ai_memory_max_turns=_positive_int(
+            source, "AI_MEMORY_MAX_TURNS", "6"
+        ),
+        ai_memory_max_chars=_positive_int(
+            source, "AI_MEMORY_MAX_CHARS", "8000"
+        ),
+        ai_memory_max_groups=_positive_int(
+            source, "AI_MEMORY_MAX_GROUPS", "256"
+        ),
     )
 
 
